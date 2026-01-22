@@ -1,119 +1,104 @@
 import discord
 from discord.ext import commands, tasks
-import os, random, requests
-from flask import Flask, render_template_string
+import os, random, requests, json
+from flask import Flask
 from threading import Thread
 
-# --- 1. إعداد خادم الويب (لوحة التحكم) ---
+# --- إعداد الويب ---
 app = Flask('')
-
-# واجهة بسيطة للوحة التحكم (HTML)
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <title>لوحة تحكم بوت الأذكار</title>
-    <style>
-        body { background-color: #1a1a2e; color: white; font-family: sans-serif; text-align: center; padding: 50px; }
-        .card { background: #16213e; padding: 20px; border-radius: 15px; display: inline-block; border: 1px solid #0f3460; }
-        h1 { color: #e94560; }
-        .status { color: #4ee44e; font-weight: bold; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h1>🌙 بوت أذكار حصن المسلم</h1>
-        <p>حالة البوت الآن: <span class="status">متصل (Online)</span></p>
-        <hr>
-        <p>استخدم الأوامر في ديسكورد للتحكم:</p>
-        <ul style="list-style: none; padding: 0;">
-            <li><code>!z</code> - ذكر عشوائي</li>
-            <li><code>!z 27</code> - أذكار الصباح</li>
-            <li><code>!z 28</code> - أذكار المساء</li>
-            <li><code>!setup #channel</code> - ضبط القناة التلقائية</li>
-        </ul>
-    </div>
-</body>
-</html>
-"""
-
 @app.route('/')
-def home():
-    return render_template_string(HTML_TEMPLATE)
+def home(): return "<h1>Azkar Bot: All-in-One API Active</h1>"
 
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
+def run(): app.run(host='0.0.0.0', port=8080)
 def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# --- 2. إعداد البوت وربطه بـ API حصن المسلم ---
+# --- إعداد البوت ---
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# قاعدة بيانات بسيطة لحفظ قنوات السيرفرات
-server_configs = {} 
+# قاعدة بيانات القنوات
+server_channels = {}
 
-def get_hisn_data(id):
-    """جلب الأذكار من API حصن المسلم بناءً على القسم"""
+# وظيفة لجلب "كل" فهرس الأبواب من حصن المسلم
+def get_all_sections():
     try:
-        url = f"https://www.hisnmuslim.com/api/ar/{id}.json"
-        res = requests.get(url)
+        url = "https://www.hisnmuslim.com/api/ar/husn_ar.json"
+        res = requests.get(url, timeout=10)
+        return res.json()['العربية'] # يعيد قائمة بكل الأبواب (ID واسم الباب)
+    except:
+        return []
+
+def get_athkar_by_id(s_id):
+    try:
+        url = f"https://www.hisnmuslim.com/api/ar/{s_id}.json"
+        res = requests.get(url, timeout=10)
         data = res.json()
-        # استخراج القائمة من مفتاح القسم (مثل 'أذكار الصباح')
         key = list(data.keys())[0]
-        athkar_list = data[key]
-        item = random.choice(athkar_list)
-        return item['ARABIC_TEXT'], item['TITLE']
-    except Exception as e:
-        print(f"Error fetching API: {e}")
-        return "سبحان الله وبحمده", "ذكر"
+        return data[key] # يعيد قائمة الأذكار داخل هذا الباب
+    except:
+        return []
 
 @bot.event
 async def on_ready():
-    print(f'✅ متصل باسم: {bot.user}')
+    print(f'✅ {bot.user} متصل ويشمل كامل الـ API')
     auto_sender.start()
 
-# --- 3. الأوامر ---
+# --- الأوامر الجديدة ---
+
+@bot.command(name="الأبواب", aliases=['sections', 'categories'])
+async def list_sections(ctx):
+    """عرض قائمة ببعض أبواب حصن المسلم المتاحة"""
+    sections = get_all_sections()
+    # سنعرض أول 20 باباً كمثال لعدم إطالة الرسالة
+    text = "\n".join([f"**{s['ID']}** - {s['TITLE']}" for s in sections[:20]])
+    embed = discord.Embed(title="📚 فهرس حصن المسلم (أمثلة)", description=text, color=0x3498db)
+    embed.set_footer(text="استخدم !z مع رقم الباب لعرض أذكاره")
+    await ctx.send(embed=embed)
 
 @bot.command(aliases=['ذكر', 'z'])
-async def athkar(ctx, section_id: int = None):
+async def thker(ctx, section_id: int = None):
     """
-    !z -> ذكر عشوائي من الصباح أو المساء
-    !z 27 -> أذكار الصباح حصراً
+    !z -> ذكر عشوائي تماماً من أي باب في الكتاب
+    !z 27 -> أذكار الصباح
     """
-    # إذا لم يحدد ID، يختار عشوائياً بين الصباح (27) والمساء (28)
-    s_id = section_id if section_id else random.choice([27, 28])
-    text, title = get_hisn_data(s_id)
+    if section_id is None:
+        # اختيار باب عشوائي من كل الأبواب المتاحة في الـ API
+        sections = get_all_sections()
+        section_id = random.choice(sections)['ID']
     
-    embed = discord.Embed(title=title, description=text, color=0xe94560)
-    embed.set_footer(text="المصدر: حصن المسلم")
-    await ctx.send(embed=embed)
+    athkar_list = get_athkar_by_id(section_id)
+    if athkar_list:
+        item = random.choice(athkar_list)
+        embed = discord.Embed(title=item['TITLE'], description=item['ARABIC_TEXT'], color=0xe94560)
+        if item['TRANSLITERATION']:
+            embed.add_field(name="ملاحظة", value=item['NOTES'] or "لا يوجد", inline=False)
+        embed.set_footer(text=f"المصدر: حصن المسلم | رقم الباب: {section_id}")
+        await ctx.send(embed=embed)
+    else:
+        await ctx.send("❌ عذراً، لم أتمكن من جلب البيانات لهذا القسم.")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setup(ctx, channel: discord.TextChannel):
-    """ضبط القناة للإرسال التلقائي"""
-    server_configs[ctx.guild.id] = channel.id
-    await ctx.send(f"✅ تم اختيار {channel.mention} لإرسال أذكار حصن المسلم تلقائياً كل ساعة.")
+    server_channels[str(ctx.guild.id)] = channel.id
+    await ctx.send(f"✅ تم بنجاح ضبط {channel.mention} للإرسال التلقائي الشامل.")
 
-# --- 4. المهام التلقائية ---
-@tasks.loop(hours=1)
+@tasks.loop(minutes=60)
 async def auto_sender():
-    for guild_id, ch_id in server_configs.items():
+    for guild_id, ch_id in server_channels.items():
         channel = bot.get_channel(ch_id)
         if channel:
-            text, title = get_hisn_data(random.choice([27, 28]))
-            embed = discord.Embed(title=f"🔔 {title}", description=text, color=0x4ee44e)
-            await channel.send(embed=embed)
+            # اختيار عشوائي حقيقي من كامل الكتاب
+            sections = get_all_sections()
+            s_id = random.choice(sections)['ID']
+            athkar = get_athkar_by_id(s_id)
+            if athkar:
+                item = random.choice(athkar)
+                embed = discord.Embed(title=f"🔔 {item['TITLE']}", description=item['ARABIC_TEXT'], color=0x2ecc71)
+                await channel.send(embed=embed)
 
-# --- 5. التشغيل النهائي ---
 if __name__ == "__main__":
     keep_alive()
-    token = os.environ.get('DISCORD_TOKEN')
-    if token:
-        bot.run(token)
-    else:
-        print("❌ خطأ: لم يتم العثور على DISCORD_TOKEN في إعدادات رندر")
+    bot.run(os.environ.get('DISCORD_TOKEN'))
