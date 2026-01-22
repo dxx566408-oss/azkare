@@ -1,13 +1,13 @@
 import discord
 from discord.ext import commands, tasks
-import os, random
+import os, random, requests
 from flask import Flask
 from threading import Thread
 
-# --- إعداد الويب لـ Render ---
+# --- إعداد الويب ---
 app = Flask('')
 @app.route('/')
-def home(): return "Dashboard is Running!"
+def home(): return "Dashboard is Online!"
 
 def keep_alive():
     Thread(target=lambda: app.run(host='0.0.0.0', port=8080)).start()
@@ -16,44 +16,49 @@ def keep_alive():
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# تخزين القنوات (ملاحظة: للحفاظ عليها للأبد سنحتاج MongoDB لاحقاً)
-server_channels = {}
+# رابط API للأذكار (مثال لقاعدة بيانات شاملة)
+AZKAR_URL = "https://raw.githubusercontent.com/osamayat/azkar-db/master/azkar.json"
 
-azkar_db = {
-    "صباح": ["أصبحنا وأصبح الملك لله", "اللهم بك أصبحنا"],
-    "مساء": ["أمسينـا وأمسى الملك لله", "اللهم بك أمسينا"],
-    "تسبيح": ["سبحان الله وبحمده", "سبحان الله العظيم"],
-    "حديث": ["قال ﷺ: خيركم من تعلم القرآن وعلمه"]
-}
+def get_random_thker(category=None):
+    try:
+        response = requests.get(AZKAR_URL)
+        data = response.json()
+        if category:
+            # فلترة الأذكار حسب الفئة (صباح، مساء، إلخ)
+            filtered = [a for a in data if category in a['category']]
+            return random.choice(filtered)['content'] if filtered else "لم يتم العثور على ذكر في هذه الفئة."
+        return random.choice(data)['content']
+    except:
+        return "سبحان الله وبحمده" # ذكر احتياطي في حال تعطل الـ API
 
-@bot.event
-async def on_ready():
-    print(f'✅ {bot.user} جاهز للعمل!')
-    auto_athkar.start()
-
-# --- الأوامر المباشرة ---
+# --- الأوامر ---
 
 @bot.command(aliases=['ذكر', 'z'])
-async def thker(ctx):
-    """أمر ذكر فوري باختصارات !z أو !ذكر"""
-    category = random.choice(list(azkar_db.keys()))
-    await ctx.send(f"✨ **{category}:** {random.choice(azkar_db[category])}")
+async def thker(ctx, category: str = None):
+    """
+    أمر الذكر:
+    !z -> ذكر عشوائي
+    !z صباح -> ذكر من أذكار الصباح
+    """
+    msg = get_random_thker(category)
+    await ctx.send(f"✨ **{category or 'ذكر'}:**\n> {msg}")
 
 @bot.command()
-@commands.has_permissions(administrator=True)
-async def setup(ctx, channel: discord.TextChannel):
-    """تحديد قناة معينة للأذكار تلقائياً !setup #channel"""
-    server_channels[ctx.guild.id] = channel.id
-    await ctx.send(f"✅ تم ضبط قناة الأذكار على {channel.mention}")
+async def hadith(ctx):
+    """جلب حديث نبوي عشوائي"""
+    # مثال لـ API أحاديث
+    res = requests.get("https://ahadith-api.herokuapp.com/api/ahadith/random/ar")
+    if res.status_code == 200:
+        data = res.json()
+        await ctx.send(f"📖 **حديث شريف:**\n> {data['hadith']['hadith_ar']}")
+    else:
+        await ctx.send("تعذر جلب حديث حالياً، صلِّ على النبي!")
 
-# --- نظام الإرسال التلقائي كل ساعة ---
+# --- نظام الجدولة (تلقائي) ---
 @tasks.loop(hours=1)
 async def auto_athkar():
-    for guild_id, ch_id in server_channels.items():
-        channel = bot.get_channel(ch_id)
-        if channel:
-            category = random.choice(list(azkar_db.keys()))
-            await channel.send(f"🔔 **أذكار تلقائية:**\n> {random.choice(azkar_db[category])}")
+    # هنا تضع منطق إرسال الأذكار للقنوات المسجلة كما فعلنا سابقاً
+    pass
 
 keep_alive()
 bot.run(os.environ.get('DISCORD_TOKEN'))
