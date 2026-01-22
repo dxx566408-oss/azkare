@@ -1,2 +1,4 @@
 discord.py
-flask
+quart
+motor
+python-dotenv
