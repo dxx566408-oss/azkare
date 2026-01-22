@@ -1,48 +1,37 @@
 import discord
-from discord.ext import commands
 import os
 from flask import Flask
 from threading import Thread
 
-# --- إعداد الويب لـ Render ---
+# خادم ويب بسيط لـ Render
 app = Flask('')
 @app.route('/')
-def home(): return "Bot is Alive!"
-
-def run(): app.run(host='0.0.0.0', port=8080)
+def home(): return "<h1>Bot is Listening...</h1>"
 def keep_alive():
-    t = Thread(target=run)
-    t.start()
+    Thread(target=lambda: app.run(host='0.0.0.0', port=8080)).start()
 
-# --- إعداد البوت ---
-# ملاحظة: تأكد من تفعيل MESSAGE CONTENT من موقع المطورين
-intents = discord.Intents.all() # سنستخدم 'all' هذه المرة لضمان تشغيل كل شيء
+# استخدام Intents.all() لكسر أي قيود
+intents = discord.Intents.all()
+client = discord.Client(intents=intents)
 
-bot = commands.Bot(command_prefix='!', intents=intents)
-
-@bot.event
+@client.event
 async def on_ready():
-    print(f'✅ سجلت الدخول باسم: {bot.user}')
+    print(f'✅ تم الاتصال بنجاح باسم: {client.user}')
+    print(f'✅ أنا الآن موجود في {len(client.guilds)} سيرفر')
 
-# هذا الحدث سيرد على أي رسالة ترسلها مهما كان محتواها للتجربة
-@bot.event
+@client.event
 async def on_message(message):
-    if message.author == bot.user:
-        return
+    # سيطبع في الـ Logs أي رسالة يراها البوت حتى لو كانت من بوت آخر
+    print(f"📡 استلمت إشارة: '{message.content}' من {message.author}")
     
-    # إذا كتبت أي شيء، سيرد عليك البوت لتأكيد أنه "يسمعك"
-    if message.content:
-        print(f"وصلتني رسالة: {message.content}")
-        # await message.channel.send(f"لقد استلمت رسالتك: {message.content}") # جرب تفعيل هذا السطر لاحقاً
+    if message.author == client.user:
+        return
 
-    await bot.process_commands(message)
+    # الرد المباشر لتأكيد العمل
+    try:
+        await message.channel.send(f"أسمعك بوضوح! كتبت: {message.content}")
+    except Exception as e:
+        print(f"❌ فشلت في الرد بسبب: {e}")
 
-@bot.command()
-async def ping(ctx):
-    await ctx.send("Pong! 🏓")
-
-# --- التشغيل ---
-if __name__ == "__main__":
-    keep_alive()
-    token = os.environ.get('DISCORD_TOKEN')
-    bot.run(token)
+keep_alive()
+client.run(os.environ.get('DISCORD_TOKEN'))
